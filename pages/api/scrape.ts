@@ -1,48 +1,40 @@
-import { ChatMessage, OpenAIStream } from '../../utils/OpenAIStream';
-import { convert } from 'html-to-text';
+import { convert } from "html-to-text";
+import { ChatMessage, OpenAIStream } from "../../utils/OpenAIStream";
+
+interface RequestData {
+  html: string;
+  apiToken: string;
+}
 
 export const config = {
-  runtime: 'edge',
+  runtime: "edge",
 };
 
 export default async function handler(req: Request) {
-  const { url, apiToken } = (await req.json()) as {
-    url?: string;
-    apiToken?: string;
-  };
+  const { html, apiToken } = (await req.json()) as RequestData;
 
-  if (!url || !apiToken) {
-    return new Response('No prompt in the request', { status: 500 });
+  if (!html || !apiToken) {
+    console.log("Invalid request. HTML and API token are required.");
+    return new Response("Invalid request. HTML and API token are required.", {
+      status: 400,
+    });
   }
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-    });
+    const text = convert(html); // Convert HTML to plain text
 
-    const html = await response.text();
+    console.log("HTML:", html);
+    console.log("Plain Text:", text);
 
-    const options = {
-      selectors: [
-        { selector: 'img', format: 'skip' },
-        { selector: 'a', format: 'skip' },
-        { selector: 'footer', format: 'skip' },
-        { selector: 'header', format: 'skip' },
-      ],
-      leadingLineBreaks: 1,
-    };
-    let text = convert(html, options).replace(/^\s*[\r\n]/gm, '\n');
-    const format = `Put this pricing plans into a JSON with keys "plan_name", "plan_amount", "currency_code", "frequency" and "features". Freqency should be either 'monthly' or 'yearly'. Currency code should be in ISO 4217 format. Features should be array of strings.`;
-
+    const formatPrompt = `Put this event data into a JSON with keys "Date", "City, "State" "Venue", "Ticket Link" "Longitude" & "Latitude" Use the city to generate Longitude and Latitude.  \n`;
+    const userPrompt = `Can you format this unstructured event data into structured format?\n\nInput text:\n${text}\n`;
     const messages: ChatMessage[] = [
-      {
-        role: 'user',
-        content: `Can you format this input text unstructured pricing plan text into structured format. ${format}. Input text: ${text}`,
-      },
+      { role: "user", content: formatPrompt },
+      { role: "assistant", content: userPrompt },
     ];
 
     const payload = {
-      model: 'gpt-3.5-turbo',
+      model: "gpt-3.5-turbo-16k",
       messages,
       temperature: 0.5,
       top_p: 1,
@@ -52,11 +44,17 @@ export default async function handler(req: Request) {
       stream: true,
       n: 1,
     };
+    console.log("OpenAI API Request:", payload);
 
     const stream = await OpenAIStream(payload, apiToken);
-    return new Response(stream);
-  } catch (e: any) {
-    console.log({ e });
-    return new Response(e, { status: 500 });
+
+    console.log("OpenAI Streaming Response:", stream);
+
+    return new Response(stream, { status: 200 });
+  } catch (error: any) {
+    console.log("An error occurred:", error);
+    return new Response("Error occurred while processing the HTML", {
+      status: 500,
+    });
   }
 }
